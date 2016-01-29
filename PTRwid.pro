@@ -603,6 +603,7 @@ PRO createAvgSpectra, event
   for i=0,n[0]-1 do begin
     Names[i]=FILE_BASENAME(Files[i])
   endfor
+  
   i=0
   WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'Text_Ind1'), SET_VALUE=string(i, format='(I5)')
   WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'Text_Ind2'), SET_VALUE=string(i, format='(I5)')
@@ -619,9 +620,7 @@ PRO createAvgSpectra, event
   WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'base_10'), set_uVALUE= -9999
   WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'base_12'), set_uVALUE= -9999
 
-;numberOfFiles=6
-numberOfFiles = (size(Files,/DIMENSIONS))[0]-1
-
+numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
 ; read ToF-parameters a, t0, ex from the first file, do mass correction and baseline for every "new" file not already processed:
   for i=0,numberOfFiles do begin
     Name1=Names[i]
@@ -1515,7 +1514,16 @@ compile_opt idl2
  
       endfor
     endfor
- 
+    
+    
+ peaksum=findgen(n[0])
+ ; normalize Peakshape:
+    for i=0,n[0]-1 do begin
+      peaksum[i]=total(peaks[i,*])
+      for jjj=0,m[0]-1 do begin
+        peaks[i,jjj]=peaks[i,jjj]/peaksum[i]
+      endfor
+    endfor
  
     ; solve LGL:
     A = make_array(n[0],n[0],/FLOAT, Value=0)
@@ -1524,7 +1532,7 @@ compile_opt idl2
     for i=0,n[0]-1 do begin
       c = total(peaks[i,*], /CUMULATIVE)
       c=c/max(c)
-      bins = where(c gt 0.2 and c lt 0.8)
+      bins = where(c gt 0.1 and c lt 0.9)
       bin1 = min(bins)
       bin2 = max(bins)
       S[i] = total(AvgSpectrum[bin1:bin2])-total(AvgBaseline[bin1:bin2])
@@ -1552,15 +1560,15 @@ compile_opt idl2
     derivData=deriv(Data)
     
     mist=size(data,/dimensions)
-    xmin=round(mist[0]/4.0)
-    xmax=round(mist[0]*3.0/4.0)
+    xmin=round(mist[0]*0.25)
+    xmax=round(mist[0]*0.75)
     !P.MULTI = [0,2,2]
     loadct,38
     !x.oMARGIN=[0,0] 
-    plot, x[xmin:xmax],  avgSpectrum[xmin:xmax], /YNOZERO, xstyle=1,ystyle=1,  XTITLE='Da', YTITLE='signal' , color=0, background=-1,yrange=[0,max(maxSpectrum[xmin:xmax])+max(maxSpectrum[xmin:xmax])/10], charsize=1.5
+    plot, x[xmin:xmax],  avgSpectrum[xmin:xmax], /YNOZERO, xstyle=1,ystyle=1,  XTITLE='Da', YTITLE='signal' , color=0, thick=2, background=-1,yrange=[0,max(maxSpectrum[xmin:xmax])+max(maxSpectrum[xmin:xmax])/10], charsize=1.5
     loadct,31
-    oplot, x[xmin:xmax],  minSpectrum[xmin:xmax], color=187
-    oplot, x[xmin:xmax],  maxSpectrum[xmin:xmax], color=187
+    oplot, x[xmin:xmax],  minSpectrum[xmin:xmax], color=3
+    oplot, x[xmin:xmax],  maxSpectrum[xmin:xmax], color=3
 
     ;oplot, [intstart,intstart],[min(data[xmin:xmax]),max(data[xmin:xmax])],color=28
     ;oplot, [intend,intend],[min(data[xmin:xmax]),max(data[xmin:xmax])],color=28
@@ -1669,17 +1677,17 @@ compile_opt idl2
       endif else plot, [0,0],[0,0]
     endif else begin ; print derivdata
       loadct,38
-      plot, x[xmin:xmax],  avgSpectrum[xmin:xmax], /YLOG, /YNOZERO, xstyle=1,ystyle=1,  XTITLE='Da', YTITLE='signal' , color=0, background=-1,yrange=[min(minSpectrum[xmin:xmax])*0.9,max(maxSpectrum[xmin:xmax])+max(maxSpectrum[xmin:xmax])/10], charsize=1.5
+      plot, x[xmin:xmax],  avgSpectrum[xmin:xmax], /YLOG, /YNOZERO, xstyle=1,ystyle=1,  XTITLE='Da', YTITLE='signal' , color=0, thick=2, background=-1,yrange=[min(minSpectrum[xmin:xmax])*0.9,max(maxSpectrum[xmin:xmax])+max(maxSpectrum[xmin:xmax])/10], charsize=1.5
       loadct,31
-      oplot, x[xmin:xmax],  minSpectrum[xmin:xmax], color=187
-      oplot, x[xmin:xmax],  maxSpectrum[xmin:xmax], color=187
+      ;oplot, x[xmin:xmax],  minSpectrum[xmin:xmax], color=3
+      ;oplot, x[xmin:xmax],  maxSpectrum[xmin:xmax], color=3
       oplot, x[xmin:xmax],  avgbaseline[xmin:xmax], color=28, thick=2
-      oplot, x[xmin:xmax],  data[xmin:xmax], color=35, thick=2
+      ;oplot, x[xmin:xmax],  data[xmin:xmax], color=35, thick=2
       oplot, [Pcenter,Pcenter], [min(data[xmin:xmax]),max(data[xmin:xmax])], color=28
       
       n = size(peaksInvolved, /DIMENSIONS)
       for i=0,n[0]-1 do begin
-        oplot, x[xmin:xmax],Peaks[i,xmin:xmax]*coeffs[i], color=144
+      ;  oplot, x[xmin:xmax],Peaks[i,xmin:xmax]*coeffs[i], color=144
       endfor
 
       sumFit = Peaks[0,*]*coeffs[0]
@@ -1700,7 +1708,7 @@ compile_opt idl2
       ;      oplot, [pstart,pend],[0,0],color=28, thick=3
     endelse
    
-   
+   y=fehler
     
  endif
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
