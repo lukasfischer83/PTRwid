@@ -1708,7 +1708,7 @@ compile_opt idl2
       ;      oplot, [pstart,pend],[0,0],color=28, thick=3
     endelse
    
-   y=fehler
+   ;y=fehler
     
  endif
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
