@@ -1540,7 +1540,7 @@ compile_opt idl2
     H5f_CLOSE, fileid
 
 ; create peak-vectors for every mass in the mass-window:
-localResolution = resolution[round(MassList[i-1])]
+localResolution = resolution[round(mymass)]
 peaksInvolved = where(MassList gt minMass and MassList lt maxMass)
 n = size(peaksInvolved, /DIMENSIONS)
 m = size(X, /DIMENSIONS)
@@ -1632,6 +1632,8 @@ coeffs = Ai#S
 cps = coeffs*0
 
 for i=0,n[0]-1 do begin
+  if Faktor[i]<0.5 then faktor[i]=0.75
+
   cps[i]=coeffs[i]/Faktor[i]
 endfor
 
@@ -1643,6 +1645,7 @@ cpsFiles = make_array(n[0],tmp[1],value=0.0)
 for k=0,tmp[1]-1 do begin
   coeffsFiles[*,k] = Ai#SFiles[*,k]
   for l=0,n[0]-1 do begin
+    if Faktor[l]<0.5 then faktor[l]=0.75
     cpsFiles[l,k] = coeffsFiles[l,k]/Faktor[l]
   endfor
 endfor
@@ -1763,7 +1766,7 @@ i=event.index
    endfor
    
 
-    
+   y=fehler 
  endif
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -5686,7 +5689,7 @@ WINDOW, 4, xsize=1150,ysize=700
               dims=size(y,/dimensions)
               ;plot, x7, y[*,0],color=0,background=-1, xrange=[-4,4], yrange=[-0.2,1.2], ytitle='normalized signal',xtitle='relative m/z [multiples of estimated FWHM]', charsize=1.2, charthick=1.5
               ;for iii=0,dims[1]-1 do oplot , x7, y[*,iii] ,color=145     
-              quant=findgen(100)/200
+              quant=findgen(100)/200 ;--MB (tuned for PTR3)
               quant=quant[3:52]
               fit2=fltarr(mul*PtsPerFWHM+1,50)
               for iii=0,mul*PtsPerFWHM do fit2[iii,*]=quantile(y[iii,*], quant)
