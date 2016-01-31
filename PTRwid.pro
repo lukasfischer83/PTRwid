@@ -732,6 +732,14 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
   ; get SumSpectrum: (unit: ions per bin per file)
   if (i eq 0) then begin
     s = getSumSpec(files(i))
+    file_id = H5F_OPEN(files[i])
+    dataset_id1 = H5D_OPEN(file_id, '/AcquisitionLog/Log')
+    tmp = H5D_READ(dataset_id1)
+    tmp2 = tmp[0]
+    timestamp = float(tmp2.TIMESTAMP)
+    unix_timestamp = (timestamp-130893181529880000.0)/1.0e7+1444844552.0
+    H5F_CLOSE, file_id
+
     tmp = size(s.SumSpec, /DIMENSIONS)
     sumSpecMean = s.SumSpec
     ;sumSpecMin = sumSpecMean
@@ -743,12 +751,20 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
     a0 = Filepar.a
     t00 = Filepar.t0
     ex0 = FilePar.ex
-    saveSpec, destfolder, Names(i), sumSpecMean, Filepar, s.SampInt, s.Duration
+    saveSpec, destfolder, Names(i), sumSpecMean, Filepar, s.SampInt, s.Duration, unix_timestamp
     ;s2 = total(sumSpecMean[m2t(184.5, Filepar.a, Filepar.t0, Filepar.ex, s.SampInt):m2t(184.5, Filepar.a, Filepar.t0, Filepar.ex, s.SampInt)])
 
 
   endif else begin
     s = getSumSpec(files(i))
+    file_id = H5F_OPEN(files[i])
+    dataset_id1 = H5D_OPEN(file_id, '/AcquisitionLog/Log')
+    tmp = H5D_READ(dataset_id1)
+    tmp2 = tmp[0]
+    timestamp = float(tmp2.TIMESTAMP)
+    unix_timestamp = (timestamp-130893181529880000.0)/1.0e7+1444844552.0
+    H5F_CLOSE, file_id
+    
     tmp = size(s.SumSpec, /DIMENSIONS)
     sumSpec = s.SumSpec
     baseLine = sumSpec
@@ -772,7 +788,7 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
       ;m=m2t(ii,Filepar.a, Filepar.t0, Filepar.ex, s.SampInt, /time)
       ;print, m
     endfor  
-    saveSpec, destfolder, Names(i),sumSpec,Filepar, s.SampInt, s.Duration
+    saveSpec, destfolder, Names(i),sumSpec,Filepar, s.SampInt, s.Duration, unix_timestamp
   
  endelse
     
@@ -790,6 +806,7 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
   ToF_p_t0 = ToF_p_a
   ToF_p_R = ToF_p_a
   ToF_p_SampleInterval = ToF_p_a
+  ToF_p_timestamp = ToF_p_a
   inttime=0
   
   
@@ -806,6 +823,8 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
     ToF_p_t0(i) = H5A_READ(id)
     id = H5A_OPEN_NAME(dataset_id1,'SampleInterval')
     ToF_p_sampleInterval(i) = H5A_READ(id)
+    id = H5A_OPEN_NAME(dataset_id1,'TimeStamp')
+    ToF_p_timestamp(i) = H5A_READ(id)
     
     if (i eq 0) then begin
       dataset_id1 = H5D_OPEN(file_id, '/SumSpectrum')
@@ -1010,8 +1029,6 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
 
   tmp = getsumspec(files[0])
   peaks=DetectPeaks(SumSpec, ToF_p_a[0], ToF_p_t0[0],ToF_p_ex[0],tmp.SampInt)
-  WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'List_Masses'), SET_VALUE= string([3.1416,peaks[*,0]], format='(F8.4)')
-  WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'List_Masses'), SET_uVALUE= [3.1416,peaks[*,0]]
 
 
 
@@ -1028,6 +1045,7 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
   sampInt = ToF_p_sampleInterval[0]
   R = ToF_p_R
   integrationTime = inttime
+  
   ;ToF_MeanPeakShape
   ;Tof_MeanResolutionInterp
   ;std
@@ -1036,7 +1054,19 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
   Filepar=create_struct('a',a,'t0',t0,'ex',ex,'SampleInterval',sampInt,'Resolution',R,'IntegrationTime',integrationTime, $
     'PeakShape',Tof_MeanPeakShape,'PeakShapeX',Xnew,'ResolutionVsMass',ToF_MeanResolutionInterp,'stdResolutionVsMass',std)
   
-  saveSumSpecs, destfolder, 'ResultSpectra', Names, Filepar, peaks[*,0], ToF_p_a, ToF_p_t0, Tof_p_ex, sumSpecMin, sumSpecMax
+  saveSumSpecs, destfolder, 'ResultSpectra', Names, Filepar, peaks[*,0], ToF_p_a, ToF_p_t0, Tof_p_ex, sumSpecMin, sumSpecMax, ToF_p_timestamp
+  
+  
+  file_id = H5F_OPEN(destFolder+'ResultSpectra.hdf5')
+  dataset_id1 = H5D_OPEN(file_id, '/MassList')
+  MassList = H5D_read(dataset_id1)
+  H5F_CLOSE, file_id
+  WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'List_Masses'), SET_VALUE= string([3.1416,MassList], format='(F8.4)')
+  WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'List_Masses'), SET_uVALUE= [3.1416,MassList]
+
+  
+  
+  
   ;destfolder+Names(i)+'_corrected.hdf5'
 ; = fehler
   
@@ -1393,9 +1423,8 @@ compile_opt idl2
  ;;;;   plot for masslist from individual file ---MB
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
- if((min(msslst)-3.1416) le 0.01 ) then begin ;if first mass is pi then this is a sum spectrum...
+ if((min(msslst)-3.1416) le 0.01 and event.index gt 0) then begin ;if first mass is pi then this is a sum spectrum...
 
-    print, 'Martin was here'
     WINDOW, 0, xsize=1250,ysize=700
 
     WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'Label_5'), GET_uVALUE= Filepar
@@ -1409,6 +1438,7 @@ compile_opt idl2
     i=event.index
     minMass = masses[i]-1
     maxMass = masses[i]+1
+    myMass = masses[i]
 
 
     file_id = H5F_OPEN(destFolder+'ResultSpectra.hdf5')
@@ -1446,8 +1476,16 @@ compile_opt idl2
 
     H5S_SELECT_HYPERSLAB, dataspace_id1, start2, count,  /RESET
     memory_space_id1 = H5S_CREATE_SIMPLE(count)
-
     Data=rearrange(H5D_READ(dataset_id1, FILE_SPACE=dataspace_id1, MEMORY_SPACE=memory_space_id1)) ; Data
+
+    dataset_id1 = H5D_OPEN(fileid, '/BaseLines')
+    dataspace_id1 = H5D_GET_SPACE(dataset_id1)
+    Dims=H5S_GET_SIMPLE_EXTENT_DIMS(Dataspace_id1)
+    H5S_SELECT_HYPERSLAB, dataspace_id1, start2, count,  /RESET
+    memory_space_id1 = H5S_CREATE_SIMPLE(count)
+    BaseLines=rearrange(H5D_READ(dataset_id1, FILE_SPACE=dataspace_id1, MEMORY_SPACE=memory_space_id1)) ; Data
+
+
 
     dataset_id1 = H5D_OPEN(fileid, '/MassAxis')
     dataspace_id1 = H5D_GET_SPACE(dataset_id1)
@@ -1463,6 +1501,10 @@ compile_opt idl2
     PeakShapeX = H5D_read(dataset_id1)
     dataset_id1 = H5D_OPEN(fileid, '/MassList')
     MassList = H5D_read(dataset_id1)
+
+    dataset_id1 = H5D_OPEN(fileid, '/TimeStamps')
+    unix_timestamps = H5D_read(dataset_id1)
+
     peakShapeCum = total(PeakShape, /CUMULATIVE)
     peakShape=peakShape/max(peakShapeCum)
     print, total(peakShape)    
@@ -1497,57 +1539,119 @@ compile_opt idl2
     H5S_CLOSE, dataspace_id1
     H5f_CLOSE, fileid
 
-
-    localResolution = resolution[round(masses[i])]
-    peaksInvolved = where(MassList gt minMass and MassList lt maxMass)
-    n = size(peaksInvolved, /DIMENSIONS)
-    m = size(X, /DIMENSIONS)
-    peaks = make_array(n[0],m[0],/FLOAT, Value=0)
-    for i=0,n[0]-1 do begin
-      mass = MassList[peaksInvolved[i]]
-      for k=0,m[0]-1 do begin
-        dx=(X[k]-mass)*localResolution/mass
-        if (dx gt min(peakShapeX)) and (dx lt max(peakShapeX)) then begin
-          indx = value_locate(PeakShapeX,dx)
-          peaks[i,k]=PeakShape[indx]
-        endif
+; create peak-vectors for every mass in the mass-window:
+localResolution = resolution[round(MassList[i-1])]
+peaksInvolved = where(MassList gt minMass and MassList lt maxMass)
+n = size(peaksInvolved, /DIMENSIONS)
+m = size(X, /DIMENSIONS)
+peaks = make_array(n[0],m[0],/FLOAT, Value=0)
+peakUnderInvestigation = -1
+    
+for i=0,n[0]-1 do begin
+  if (abs((myMass - MassList[peaksInvolved[i]])) lt 0.001) then begin
+     peakUnderInvestigation = i
+  endif
+      
+  mass = MassList[peaksInvolved[i]]
+  for k=0,m[0]-1 do begin
+    dx=(X[k]-mass)*localResolution/mass
+    if (dx gt min(peakShapeX)) and (dx lt max(peakShapeX)) then begin
+      indx = value_locate(PeakShapeX,dx)
+      peaks[i,k]=PeakShape[indx]
+    endif
+  endfor
+endfor
+    
+    
+; normalize Peakshapes:
+peaksum=findgen(n[0])
+ for i=0,n[0]-1 do begin
+   peaksum[i]=total(peaks[i,*])
+   for jjj=0,m[0]-1 do begin
+     peaks[i,jjj]=peaks[i,jjj]/peaksum[i]
+   endfor
+ endfor
  
-      endfor
-    endfor
-    
-    
- peaksum=findgen(n[0])
- ; normalize Peakshape:
-    for i=0,n[0]-1 do begin
-      peaksum[i]=total(peaks[i,*])
-      for jjj=0,m[0]-1 do begin
-        peaks[i,jjj]=peaks[i,jjj]/peaksum[i]
-      endfor
-    endfor
- 
-    ; solve LGL:
-    A = make_array(n[0],n[0],/FLOAT, Value=0)
-    S = make_array(n[0],/FLOAT, Value=0)
+; solve LGL:
+A = make_array(n[0],n[0],/FLOAT, Value=0.0)
+S = make_array(n[0],/FLOAT, Value=0.0)
+Faktor = make_array(n[0],/FLOAT, Value=0.0); defines the ratio of counted area vs. total peak area
+h1=Faktor; height of peak on left side
+h2=h1; height of peak on right side
+indx1=h1; index of that height in the smooth Peakshape vector
+indx2=h1
 
-    for i=0,n[0]-1 do begin
-      c = total(peaks[i,*], /CUMULATIVE)
-      c=c/max(c)
-      bins = where(c gt 0.1 and c lt 0.9)
-      bin1 = min(bins)
-      bin2 = max(bins)
-      S[i] = total(AvgSpectrum[bin1:bin2])-total(AvgBaseline[bin1:bin2])
-      for j=0,n[0]-1 do begin
-        A[i,j]=total(peaks[j,bin1:bin2])
-      endfor
-    endfor
 
-    Ai = invert(A)
-    coeffs = Ai#S
-    
+lower=0.1; defines the region in the normalized cumulated Peak to count
+higher=0.9
+cumPeak = total(Peakshape,/cumulative)
+cumPeak = CumPeak/max(cumPeak)
+; prepare vectors to find the rising and falling height:
+PeakShapeL = PeakShape
+PeakShapeR = PeakShape
+indx0 = where(PeakShape eq max(PeakShape))
+PeakShapeL[indx0+1:4000]=0.0
+PeakShapeR[0:indx0-1]=1.0
 
-    i=event.index
+tmp = size(Data,/DIMENSIONS)
+SFiles = make_array(n[0],tmp[1],value=0.0)
 
-          Intlist=peaktable(masses,resolution[round(masses[i])])
+for i=0,n[0]-1 do begin
+  c = total(peaks[i,*], /CUMULATIVE)
+  c=c/max(c)
+  bins = where(c gt lower and c lt higher)
+  bin1 = min(bins)
+  bin2 = max(bins)
+
+  ;find out the heights of the peak boundaries:
+  h1[i] = peaks[i,bin1]
+  h2[i] = peaks[i,bin2]      
+  indx1[i] = value_locate(PeakShapeL,h1[i])
+  indx2[i] = value_locate(PeakShapeR,h2[i])
+  Faktor[i] = cumPeak[indx2[i]]-cumPeak[indx1[i]]
+
+  ; Signal in bins of Average Spectrum:
+  S[i] = total(AvgSpectrum[bin1:bin2])-total(AvgBaseline[bin1:bin2])
+  
+  ; Signal in bins of individual Files:
+  for k=0,tmp[1]-1 do begin
+    SFiles[i,k] = total(Data[bin1:bin2,k])-total(BaseLines[bin1:bin2,k])
+  endfor
+  
+  ; create Matrix
+  for j=0,n[0]-1 do begin
+    A[i,j]=total(peaks[j,bin1:bin2])
+  endfor
+endfor
+
+Ai = invert(A); invert Matrix
+
+; solve for averge Spectrum:
+coeffs = Ai#S
+; convert to cps using 'Faktor':
+cps = coeffs*0
+
+for i=0,n[0]-1 do begin
+  cps[i]=coeffs[i]/Faktor[i]
+endfor
+
+; same same for each individual File:
+tmp = size(Data,/DIMENSIONS)
+coeffsFiles = make_array(n[0],tmp[1],value=0.0)
+cpsFiles = make_array(n[0],tmp[1],value=0.0)
+
+for k=0,tmp[1]-1 do begin
+  coeffsFiles[*,k] = Ai#SFiles[*,k]
+  for l=0,n[0]-1 do begin
+    cpsFiles[l,k] = coeffsFiles[l,k]/Faktor[l]
+  endfor
+endfor
+
+
+
+i=event.index
+
+          Intlist=peaktable(MassList,resolution[round(masses[i])])
           IntStart=Intlist[i,1]
           IntEnd=Intlist[i,2]
           start=IntStart
@@ -1562,6 +1666,8 @@ compile_opt idl2
     mist=size(data,/dimensions)
     xmin=round(mist[0]*0.25)
     xmax=round(mist[0]*0.75)
+    
+    ; plot lin peakshapes: --------------
     !P.MULTI = [0,2,2]
     loadct,38
     !x.oMARGIN=[0,0] 
@@ -1583,9 +1689,14 @@ compile_opt idl2
     ;weights=replicate(1.0, N_ELEMENTS(ygauss))
     ;AA=[max(ygauss),Pcenter,Pcenter/(4000* 2*SQRT(2*ALOG(2)))]
     ;xyouts, m2t(x[xmin],a,t0,ex,SampInt)+0.025,max(data[xmin:xmax]),t09str(EngData.starttime),color=0, charsize=1.1,charthick=2
-    xyouts, x[xmin]+0.025,max(maxSpectrum[xmin:xmax])*0.9,'m/z:'+string(masses[i],Format='(F8.3)'),color=0, charsize=1.1,charthick=2
+    xyouts, x[xmin]+0.025,max(maxSpectrum[xmin:xmax])*0.9,'m/z:'+string(masses[i],Format='(F8.3)'),color=0, charsize=1.5,charthick=2, font=1
     match=match(masses[i],lib)
-    xyouts, x[xmin]+0.025,max(maxSpectrum[xmin:xmax])*1,match.formula,color=28, charsize=1.1,charthick=2
+    if (peakUnderInvestigation ge 0) then begin
+      peakArea=cps[peakUnderInvestigation]
+      xyouts, x[xmin]+0.025,max(maxSpectrum[xmin:xmax])*1,match.formula+' ('+string(PeakArea,Format='(F0.1)')+' cps)',color=28, charsize=1.1,charthick=2
+    endif else begin
+      xyouts, x[xmin]+0.025,max(maxSpectrum[xmin:xmax])*1,match.formula+' (error)',color=28, charsize=1.1,charthick=2
+    endelse
     xyouts, x[xmin]+0.025,max(maxSpectrum[xmin:xmax])*0.8,'Closest matches, dm [mDa]:',color=0, charsize=1.1,charthick=1
     for r=0,8 do if (abs(match.devi[r]) gt 3 or r ne 4) then begin
       mis=match(masses[i]+match.devi[r]/1000,lib)
@@ -1597,85 +1708,9 @@ compile_opt idl2
       oplot, [Pcenter+match.devi[r]/1000,Pcenter+match.devi[r]/1000],[max(maxSpectrum[xmin:xmax])+max(maxSpectrum[xmin:xmax])/12,max(maxSpectrum[xmin:xmax])+max(maxSpectrum[xmin:xmax])/10],color=28,thick=3
     endelse
 
-    if(drop1 gt 0.5) then  begin
-      Name1=filepar.name1
-      S1=GetFileExport(event, destfolder, Name1)
-      if(max([max(S1.cpsFL),max(S1.corrcpsFL),max(S1.cpsUL),max(S1.corrcpsUL)]) eq -9999) then begin
-        WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'Label_8'), set_VALUE= 'file mass list'
-        WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'Label_8'), set_uVALUE= 'file mass list'
-        WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'Text_Ind1'), SET_VALUE=string(filepar.index, format='(I5)')
-        WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'Text_Ind2'), SET_VALUE=string(filepar.index, format='(I5)')
-        export, event
-        S1=GetFileExport(event, destfolder, Name1)
-      endif
-      tol=max([0.006,50*pcenter/1e6])
-      if(drop1 eq 1) then begin
-        if(max(S1.cpsFL) gt -9999) then begin
-          filte=where(abs(S1.massFL-pcenter) lt tol)
-          if(max(filte) gt -0.5) then datFL=reform(S1.cpsFL[filte,*]) else datFL=-9999
-        endif else datFL=-9999
-        if(max(S1.corrcpsFL) gt -9999 and max(datFL) ne -9999) then corrdatFL=reform(S1.corrcpsFL[filte,*]) else corrdatFL=-9999
-        if(max(S1.cpsUL) gt -9999) then begin
-          filte=where(abs(S1.massUL-pcenter) lt tol)
-          if(max(filte) gt -0.5) then datUL=reform(S1.cpsUL[filte,*]) else datUL=-9999
-        endif else datUL=-9999
-        if(max(S1.corrcpsUL) gt -9999 and max(datUL) ne -9999) then corrdatUL=reform(S1.corrcpsUL[filte,*]) else corrdatUL=-9999
-        if(max(datFL) ne -9999) then dat=datFL else if(max(datUL) ne -9999) then dat=datUL
-        ytit='cps'
-      endif
-      if(drop1 eq 2) then begin
-        if(max(S1.ppbFL) gt -9999) then begin
-          filte=where(abs(S1.massFL-pcenter) lt tol)
-          if(max(filte) gt -0.5) then datFL=reform(S1.ppbFL[filte,*]) else datFL=-9999
-        endif else datFL=-9999
-        if(max(S1.corrppbFL) gt -9999 and max(datFL) ne -9999) then corrdatFL=reform(S1.corrppbFL[filte,*]) else corrdatFL=-9999
-        if(max(S1.ppbUL) gt -9999) then begin
-          filte=where(abs(S1.massUL-pcenter) lt tol)
-          if(max(filte) gt -0.5) then datUL=reform(S1.ppbUL[filte,*]) else datUL=-9999
-        endif else datUL=-9999
-        if(max(S1.corrppbUL) gt -9999 and max(datUL) ne -9999) then corrdatUL=reform(S1.corrppbUL[filte,*]) else corrdatUL=-9999
-        if(max(datFL) ne -9999) then dat=datFL else if(max(datUL) ne -9999) then dat=datUL
-        ytit='ppb'
-      endif
-
-      ; if (var_exists(dat) eq 1) then begin
-      if(max(S1.massUL) gt -9999) then begin
-        Intlist=peaktable(S1.massUL,filepar.resolution)
-        IntStart=Intlist[*,1]
-        IntEnd=Intlist[*,2]
-        xyouts,m2t(x[xmin],a,t0,ex,SampInt)+0.025,max(data[xmin:xmax])/15,'int. bound. UnifMassList:', color=28,  charthick=1
-        xyouts,IntEnd,intarr(max(d(IntEnd)))+max(data[xmin:xmax])/15,strarr(max(d(IntEnd)))+'|', color=208,  charthick=3
-        xyouts,IntStart,intarr(max(d(IntStart)))+max(data[xmin:xmax])/15,strarr(max(d(IntStart)))+'|', color=28,  charthick=1
-      endif
-      if(max(S1.massFL) gt -9999) then begin
-        Intlist=peaktable(S1.massFL,filepar.resolution)
-        IntStart=Intlist[*,1]
-        IntEnd=Intlist[*,2]
-        xyouts,m2t(x[xmin],a,t0,ex,SampInt)+0.025,0,'int. bound. FileMassList:', color=28,  charthick=1
-        xyouts,IntEnd,intarr(max(d(IntEnd)))+0,strarr(max(d(IntEnd)))+'|', color=208,  charthick=3
-        xyouts,IntStart,intarr(max(d(IntStart)))+0,strarr(max(d(IntStart)))+'|', color=28,  charthick=1
-      endif
-
-      if (var_exists(dat) eq 1) then begin
 
 
-        loadct,38
-
-        plot, dat, /YNOZERO  ,  XTITLE='cycles',YTITLE=ytit , yrange=range(dat[where(dat ne -9999)]), color=0, background=-1, thick=2, charsize=1.5
-        if(max(corrdatUL) ne -9999) then oplot, corrdatUL, color=100,  thick=2
-        if(max(datUL) ne -9999) then oplot, datUL, color=50,  thick=2
-        if(max(corrdatFL) ne -9999) then oplot, corrdatFL, color=90,  thick=2
-        if(max(datFL) ne -9999) then oplot, datFL, color=40,  thick=2
-        if(max(datFL) ne -9999) then xyouts,0.91,0.44,'FL', color=40,/normal,  charthick=2
-        if(max(corrdatFL) ne -9999) then xyouts,0.91,0.415,'corr FL', color=90,/normal,  charthick=2
-        if(max(datUL) ne -9999) then xyouts,0.91,0.39,'UL', color=50,/normal,  charthick=2
-        if(max(corrdatUL) ne -9999) then xyouts,0.91,0.365,'corr UL', color=100,/normal,  charthick=2
-        makecsv,DestDir+'temp/last_cps_row.csv' ,dat
-        WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'Text_info'), sET_VALUE= ['Data (no overlap correction):', reform(string(dat[0,*]))]
-
-
-      endif else plot, [0,0],[0,0]
-    endif else begin ; print derivdata
+    ; plot log peakshapes: --------------
       loadct,38
       plot, x[xmin:xmax],  avgSpectrum[xmin:xmax], /YLOG, /YNOZERO, xstyle=1,ystyle=1,  XTITLE='Da', YTITLE='signal' , color=0, thick=2, background=-1,yrange=[min(minSpectrum[xmin:xmax])*0.9,max(maxSpectrum[xmin:xmax])+max(maxSpectrum[xmin:xmax])/10], charsize=1.5
       loadct,31
@@ -1700,15 +1735,35 @@ compile_opt idl2
       endfor
       oplot, x[xmin:xmax],sumFit[xmin:xmax]+AvgBaseline[xmin:xmax], color=28, thick=2
 
+   ; plot time series of file means in cps:
+   s = size(cpsFiles,/DIMENSIONS)
+   times = unix_timestamps
+   for i=0,s[1]-1 do begin
+      times[i]=unix_timestamps[i]-unix_timestamps[0]
+   endfor
 
-      
-      
-      ;      oplot,m2t([x[xmin],x[xmax]],a,t0,ex,SampInt),[0,0],color=0
-      ;      oplot, [Pcenter,Pcenter],[-max(derivdata[xmin:xmax])/10, max(derivdata[xmin:xmax])/10],color=28, thick=3
-      ;      oplot, [pstart,pend],[0,0],color=28, thick=3
-    endelse
+   plot, times,  cpsFiles[peakUnderInvestigation,*], /YLOG, /YNOZERO, xstyle=1,ystyle=1,  XTITLE='Time', YTITLE='cps' , color=0, thick=0, background=-1,yrange=[0.01,max(cpsFiles)*1.1], charsize=1.5
+   loadct, 33
+   counter=0
+   for i=0,s[0]-1 do begin
+    if (x[xmin] lt MassList[PeaksInvolved[i]] and x[xmax] gt MassList[PeaksInvolved[i]]) then begin
+      counter=counter+1 
+    endif
+   endfor
+   anz = counter
+   counter=0
+   for i=0,s[0]-1 do begin
+     if (x[xmin] lt MassList[PeaksInvolved[i]] and x[xmax] gt MassList[PeaksInvolved[i]]) then begin
+      t=1
+      if (i eq peakUnderInvestigation) then  t=2
+      counter=counter+1
+      c = round(255*(counter-1)/anz)
+      oplot, times, cpsFiles[i,*], color=c, thick=t
+     endif
+   endfor
    
-   ;y=fehler
+  y=fehler
+
     
  endif
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1740,7 +1795,6 @@ compile_opt idl2
           data=EngData.SumSpec
      
      
-     y=fehler
      
      
      
@@ -5606,7 +5660,8 @@ WINDOW, 4, xsize=1150,ysize=700
         ;counter2=0
         for iii=0,max(size(masses,/dimensions))-1 do begin
           ind=m2t([masses[iii]-mul*masses[iii]/reso,masses[iii]+mul*masses[iii]/reso], a, t0, ex,SampInt)
-          if(evenodd(round(masses[iii])) eq 1 and (SumSpectrumSM[times[iii]] gt minsig) and (SumSpectrumSM[times[iii]] lt maxsig/100 or SumSpectrumSM[times[iii]] lt max(minsig)*10)) then begin
+;          if((evenodd(round(masses[iii])) eq 1 and masses[iii] gt 100 )and (SumSpectrumSM[times[iii]] gt minsig) and (SumSpectrumSM[times[iii]] lt maxsig/100 or SumSpectrumSM[times[iii]] lt max(minsig)*10)) then begin
+          if( (SumSpectrumSM[times[iii]] gt minsig) and (SumSpectrumSM[times[iii]] lt maxsig/100 or SumSpectrumSM[times[iii]] lt max(minsig)*10)) then begin
             y1=SumSpectrum[indgen(max(ind)-min(ind))+min(ind)]-baselineSM[indgen(max(ind)-min(ind))+min(ind)]; subtract sumspec
             y1=y1/(SumSpectrumSM[times[iii]]-baselineSM[times[iii]]); normalize
             y1=INTERPOLATE(y1, (max(ind)-min(ind))*findgen(mul*PtsPerFWHM+1)/(mul*PtsPerFWHM+1))
@@ -6921,6 +6976,7 @@ info[0]='H5 OPEN:'
           SumSpec_id = H5D_OPEN(file_id, '/FullSpectra/SumSpectrum')
           info[2]='/FullSpectra/SumSpectrum'
           instrument='TOF8000'
+          
   endif
   if (T1000 eq 1) then begin
           T1000=-1
@@ -6981,9 +7037,10 @@ if(ErrCode eq 0) then begin
               FileStruct=H5_parse(File)
                 Extractions=Filestruct.NbrWaveforms & extractions=max(extractions._data)
                 CreationTime=FileStruct.HDF5_FILE_CREATION_TIME & CreationTime=CreationTime._data
+                
                 SampleInterval=FileStruct.fullspectra & SampleInterval=SampleInterval.sampleinterval & SampleInterval=max(SampleInterval._data)
                 SingleIonSignal=Filestruct.FullSpectra.Single_Ion_Signal._data ;---MB
-
+                
                 poisCor=FileStruct.RawData 
                 FileStruct=0
                 if(strpos(strjoin(tag_names(poisCor)),'HPTC') gt -0.5) then begin
@@ -7035,6 +7092,8 @@ if(ErrCode eq 0) then begin
 ;t09, time in days since 1.1.2009, 00:00:00
 
 StartTime=t09(CreationTime)
+
+;130893181529880000
 
 ;cause an error if highest signal is lower than MIN_SIG
 MIN_SIG=222*max(BufTimes)
@@ -7256,7 +7315,18 @@ end
 
 
 
-pro saveSumSpecs, folder, name, Names, Filepar, peaks, a, t0, ex, minSpec, maxSpec
+pro saveSumSpecs, folder, name, Names, Filepar, peaks, a, t0, ex, minSpec, maxSpec, unix_timestamps
+
+  ;if file exists, keep the masslist to avoid confusion
+  tmp = file_info(folder+name+'.hdf5') & tmp=tmp.exists
+  if (tmp eq 1) then begin ; file exists...
+    print, 'file exists, loading masslist'
+    file_id = H5F_OPEN(folder+name+'.hdf5')
+    dataset_id1 = H5D_OPEN(file_id, '/MassList')
+    peaks = H5D_read(dataset_id1)
+    H5F_CLOSE, file_id
+  endif
+
 
   ;destfolder+Names(i)+'_corrected.hdf5'
   file = folder+name+'.hdf5'
@@ -7293,6 +7363,14 @@ pro saveSumSpecs, folder, name, Names, Filepar, peaks, a, t0, ex, minSpec, maxSp
   dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
   dataset_id = H5D_CREATE(fid,'Ex',datatype_id,dataspace_id)
   H5D_WRITE,dataset_id,data
+
+
+  data = unix_timestamps
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(fid,'TimeStamps',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+  
 
   data = peaks
   datatype_id = H5T_IDL_CREATE(float(data))
@@ -7459,7 +7537,7 @@ pro saveSumSpecs, folder, name, Names, Filepar, peaks, a, t0, ex, minSpec, maxSp
 
 end
 
-pro saveSpec, folder, name, spectrum, filePar, sampInt, duration
+pro saveSpec, folder, name, spectrum, filePar, sampInt, duration, unix_timestamp
   file = folder+name+'_corrected.hdf5'
   fid = H5F_CREATE(file)
 
@@ -7510,6 +7588,9 @@ pro saveSpec, folder, name, spectrum, filePar, sampInt, duration
 
   attr_id = H5A_CREATE(dataset_id,'IntegrationTime',datatype_id,dataspace_id)
   H5A_WRITE,attr_id,duration
+
+  attr_id = H5A_CREATE(dataset_id,'TimeStamp',datatype_id,dataspace_id)
+  H5A_WRITE,attr_id,unix_timestamp
 
   H5D_CLOSE,dataset_id
   H5S_CLOSE,dataspace_id
