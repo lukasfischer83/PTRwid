@@ -1762,7 +1762,6 @@ i=event.index
      endif
    endfor
    
-  y=fehler
 
     
  endif
@@ -5687,7 +5686,7 @@ WINDOW, 4, xsize=1150,ysize=700
               dims=size(y,/dimensions)
               ;plot, x7, y[*,0],color=0,background=-1, xrange=[-4,4], yrange=[-0.2,1.2], ytitle='normalized signal',xtitle='relative m/z [multiples of estimated FWHM]', charsize=1.2, charthick=1.5
               ;for iii=0,dims[1]-1 do oplot , x7, y[*,iii] ,color=145     
-              quant=findgen(100)/100
+              quant=findgen(100)/200
               quant=quant[3:52]
               fit2=fltarr(mul*PtsPerFWHM+1,50)
               for iii=0,mul*PtsPerFWHM do fit2[iii,*]=quantile(y[iii,*], quant)
