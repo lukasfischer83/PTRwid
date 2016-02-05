@@ -74,7 +74,7 @@ PRO PTRwid
           '',$
           '_default_a_1000=7800', '_default_a_8000=17300',$
           '_default_t0_1000=-28500', '_default_t0_8000=750',$
-          '_exMin=0.49', '_exMax=0.500000015',$
+          '_exMin=0.49', '_exMax=0.500000015','_monitorMass=371.10123',$
           
          
           '',$
@@ -197,11 +197,17 @@ PRO PTRwid
               Label_9=Widget_label(base_MB_10,/Align_left, uname='Label_MB_1', value="average time [s]:")
               Text_Ind_MB1 = WIDGET_TEXT(base_MB_10, uname='averageTime', VALUE='60',/EDITABLE,xsize=getpar('Text_Ind1x'), scr_xsize=getpar('Text_Ind1x2'))
 
+              But_MB2 = WIDGET_BUTTON(base_2, uname='But_MB2',event_pro='calculateStickdata', value='calculate stick Spectra')
+
+
              base_12=widget_base(base_1,/column,uname='base_12',xsize=getpar('base_12x'),ysize=getpar('base_12y'))
                      Text_log = WIDGET_TEXT(base_12, uname="Text_log", VALUE=[log],/ALL_EVENTS, /wrap ,/scroll, YSIZE = getpar('Text_logy'))
                      Text_info = WIDGET_TEXT(base_12, uname="Text_info", VALUE=[info],/ALL_EVENTS, /wrap ,/scroll, YSIZE = getpar('Text_infoy'))
   WIDGET_CONTROL, base_1, /REALIZE
   XMANAGER, 'PTRwid', base_1, /NO_BLOCK 
+  
+
+  
 END
 
 
@@ -587,6 +593,375 @@ PRO ExtendedProc, event
  print, buti2
 END
 
+PRO calculateStickdata, event
+  WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'List_Files'),  GET_uVALUE=Files
+  
+  ; check, if all Files are there, we need them:
+  n=size(Files,/DIMENSIONS)
+  c=0
+  for i=0,n[0]-1 do begin
+    tmp = file_info(Files[i]) & tmp=tmp.exists
+    if (tmp eq 1) then c=c+1
+  endfor
+  if (c lt n[0]) then begin
+    print, 'some raw data files are missing...'
+    return 
+  endif
+  
+  ;check if ResultSpectra.hdf is present 
+  path = FILE_DIRNAME(Files[0])
+  ResultFilePath = FILEPATH('ResultSpectra.hdf5',ROOT_DIR=path, SUBDIRECTORY='w_data')
+  tmp = file_info(ResultFilePath) & tmp=tmp.exists
+  if (tmp lt 1) then begin
+    print, 'resultspectra.hdf5 is missing...'
+    return
+  endif  
+    
+  ;retrieve integration time:
+  WIDGET_CONTROL, WIDGET_INFO(event.TOP, FIND_BY_UNAME = 'averageTime'),  GET_VALUE=tmp
+  averageTime = (double(tmp))[0]
+
+  ; loop through Files to retrieve dataspace required:
+  n=size(Files,/DIMENSIONS)
+
+  counter=0
+  for file=0,n[0]-1 do begin
+    fileId = H5F_OPEN(Files[file])
+       
+    
+    ;retrieve max of BufTimes:
+    dataset_id2 = H5D_OPEN(fileId, '/TimingData/BufTimes')
+    BufTimes= H5D_READ(dataset_id2)
+    Dims3 = size(BufTimes,/DIMENSIONS)
+    actualBufTime=0.0
+    dt = BufTimes[1,0]
+    while ((actualBufTime+averageTime-dt/2.0) LT max(BufTimes)+dt) do begin
+      times = make_array(Dims3[0])
+      maxBufTime = 0.0
+      for i=0,Dims3[0]-1 do begin
+        indizes = WHERE(BufTimes[i,*] GE actualBufTime-dt/2.0 and BufTimes[i,*] LE (actualBufTime+averageTime)-dt/2.0)
+        times[i] = mean(BufTimes[i,indizes])
+        if maxBufTime LT max(BufTimes[i,indizes]) then maxBufTime=max(BufTimes[i,indizes])
+      endfor
+      time = mean(times)+dt/2.0
+      counter=counter+1
+      actualBufTime=maxBufTime+dt
+      ;if (counter GT 1.5) then begin
+      ;  y=fehler
+      ;endif
+    endwhile
+    ;print, counter   
+        
+    ;retrieve Info to convert to cps:
+    FileStruct=H5_parse(Files[file])
+    SingleIonSignal=Filestruct.FullSpectra.Single_Ion_Signal._data; ---MB
+    Extractions=Filestruct.NbrWaveforms._DATA
+    TofPeriod = Filestruct.TimingData.TofPeriod._DATA
+    TofPeriod = TofPeriod[0]
+    Extractions = Extractions[0]
+    SingleIonSignal = SingleIonSignal[0]
+    
+    inttime = Extractions*(TofPeriod*1E-9)
+    
+    H5F_CLOSE, fileId
+  endfor
+  print, counter
+
+  ;load the total result file with all the information in it:
+  
+  fileId = H5F_OPEN(ResultFilePath)
+  dataset_id1 = H5D_OPEN(fileId, '/MassList')
+  MassList = H5D_read(dataset_id1)
+  dataset_id1 = H5D_OPEN(fileId, '/A')
+  tofA = H5D_read(dataset_id1)
+  dataset_id1 = H5D_OPEN(fileId, '/T0')
+  tofT0 = H5D_read(dataset_id1)
+  dataset_id1 = H5D_OPEN(fileId, '/Ex')
+  tofEx = H5D_read(dataset_id1)
+  dataset_id1 = H5D_OPEN(fileId, '/Peakshape')
+  PeakShape = H5D_read(dataset_id1)
+  dataset_id1 = H5D_OPEN(fileId, '/PeakshapeX')
+  PeakShapeX = H5D_read(dataset_id1)
+  dataset_id1 = H5D_OPEN(fileId, '/Resolution')
+  Resolution = H5D_read(dataset_id1)
+  dataset_id1 = H5D_OPEN(fileId, '/MassAxis')
+  MassAxisBaseline = H5D_read(dataset_id1)
+  id = H5D_OPEN(fileId, '/SumSpecs')
+  aid = H5A_OPEN_NAME(id,'SampleInterval')
+  tmp = H5A_READ(aid)
+  SampleInterval = float(tmp)
+  H5F_CLOSE, fileId
+
+  m = size(MassList,/Dimensions)
+  
+  Cps = make_array(counter,m[0],/FLOAT,value=-1.0)
+  StickTimes = make_array(counter,/DOUBLE,value=-1.0) ; MATLAB timestamp
+  WIDGET_CONTROL, /HOURGLASS
+  runtimeStart=systime(1)
+
+  ;----------- start main loop
+  counter=0
+  n=size(Files,/DIMENSIONS)
+  numberOfFiles = n[0]
+  ;numberOfFiles=1
+  for file=0,numberOfFiles-1 do begin
+    filetimeStart = systime(i)
+    actualBufTime=0.0
+    fileId = H5F_OPEN(Files[file])
+    dataset_id1 = H5D_OPEN(fileId, '/FullSpectra/TofData')
+    dataspace_id1 = H5D_GET_SPACE(dataset_id1)
+    Dims=H5S_GET_SIMPLE_EXTENT_DIMS(Dataspace_id1)
+    TofData = Reform(H5D_READ(dataset_id1))
+
+    dataset_id2 = H5G_OPEN(fileId, '/TimingData')
+    aid = H5A_OPEN_NAME(dataset_id2,'AcquisitionTimeZero')
+    TimeStamp = double(H5A_READ(aid));
+    TimeStamp = TimeStamp[0]
+    unix_timestamp = (double(timestamp)-130893181529880000.0)/1.0e7+1444844552.0
+    MATLAB_timestamp = double(unix_timestamp)/86400.0 + 719529.0
+    ;y=fehler
+    ;retrieve BufTimes:
+    dataset_id2 = H5D_OPEN(fileId, '/TimingData/BufTimes')
+    BufTimes= H5D_READ(dataset_id2)
+    H5F_CLOSE, fileId
+
+    ;load actual BaseLine
+    fileId = H5F_OPEN(ResultFilePath)
+    dataset_id1 = H5D_OPEN(fileId, '/BaseLines')
+    dataspace_id1 = H5D_GET_SPACE(dataset_id1)
+    Dims2=H5S_GET_SIMPLE_EXTENT_DIMS(Dataspace_id1)
+    H5S_SELECT_HYPERSLAB, dataspace_id1, [0,file], [Dims2[0],1],  /RESET
+    memory_space_id1 = H5S_CREATE_SIMPLE([Dims2[0],1])
+    actualBaseline = H5D_READ(dataset_id1, FILE_SPACE=dataspace_id1, MEMORY_SPACE=memory_space_id1)
+    H5F_CLOSE, fileId
+
+    ;average TofData for the averageTime [s]:
+    Dims3 = size(BufTimes,/DIMENSIONS)
+    avgTofData = make_array(Dims[0],/FLOAT,value=0.0)
+    TofDatablocks = make_array(Dims[0],Dims[2])
+    times = make_array(Dims[2])
+    actualBufTime = 0.0
+    dt = BufTimes[1,0]
+    while ((actualBufTime+averageTime-dt/2.0) LT max(BufTimes)+dt) do begin
+      times = make_array(Dims3[0])
+      maxBufTime = 0.0
+      for i=0,Dims3[0]-1 do begin
+        indizes = WHERE(BufTimes[i,*] GE actualBufTime-dt/2.0 and BufTimes[i,*] LE (actualBufTime+averageTime)-dt/2.0)
+        TofDataBlocks[i] = mean(TofData[*,i,indizes],DIMENSION=3)
+        times[i] = mean(BufTimes[i,indizes])
+        if maxBufTime LT max(BufTimes[i,indizes]) then maxBufTime=max(BufTimes[i,indizes])
+      endfor
+      actualTofData = mean(TofDataBlocks,DIMENSION=2)
+
+      actualTime = mean(times)+dt/2.0
+      ; ----------------------------------------------------------------------------------------
+      
+      
+      if actualBufTime eq 0.0 then begin ;do this preparation step only in the first iteration: 
+      ;define the mass-axis for this file:
+      ;sampInt = 2E-10
+      timeAxis = findgen(Dims[0])
+      actualMassAxis = m2t(timeAxis,tofA[file],tofT0[file],tofEx[file],sampleInterval, /time)
+      didAllMasses = 0
+      outerSize=2.0
+      leftOuterMass = MassList[0]-outersize/2.0
+      ;leftOuterMass = 19.5; -----------------TESTDATA
+      
+      ;create and store normalized Peaks:
+      tmp = size(MassList, /DIMENSIONS)
+      numberInvolved = tmp[0]
+
+      tmp = size(actualMassAxis,/DIMENSIONS)
+      bins=tmp[0]
+      peaks = make_array(numberInvolved,bins,/FLOAT, Value=0)
+      
+      A = make_array(numberInvolved,numberInvolved,/FLOAT, Value=0.0)
+      S = make_array(numberInvolved,/FLOAT, Value=0.0)
+      Faktor = make_array(numberInvolved,/FLOAT, Value=0.8); defines the ratio of counted area vs. total peak area
+
+      bin1 = make_array(numberInvolved,/long,value=0)
+      bin2=bin1
+      
+      lower=0.1; defines the region in the normalized cumulated Peak to count
+      higher=0.9
+      for i=0,numberInvolved-1 do begin
+        mass = MassList[i]
+        indizes = where(PeakShape gt 1e-6)
+        masses = PeakShapeX[indizes]/Resolution[round(mass)]*mass
+        massIndizes = where(actualMassAxis gt mass+min(masses) and actualMassAxis lt mass+max(masses))
+        for k=min(massIndizes),max(massIndizes) do begin
+          dx=(actualMassAxis[k]-mass)*Resolution[round(mass)]/mass
+          ;if (dx gt min(peakShapeX)) and (dx lt max(peakShapeX)) then begin
+            indx = value_locate(PeakShapeX,dx)
+            peaks[i,k]=PeakShape[indx]
+          ;endif
+        endfor
+
+
+        peaksum=total(peaks[i,min(massIndizes):max(massIndizes)])
+        for jj=min(massIndizes),max(massIndizes) do begin
+          peaks[i,jj]=peaks[i,jj]/peaksum
+        endfor
+        
+        c = total(peaks[i,min(massIndizes):max(massIndizes)], /CUMULATIVE)
+        c=c/max(c)
+        
+        bins2 = where(c gt lower and c lt higher)
+        bin1[i] = min(bins2)+min(massIndizes)
+        bin2[i] = max(bins2)+min(massIndizes)
+        for j=0,numberInvolved-1 do begin
+          A[i,j]=total(peaks[j,bin1[i]:bin2[i]])
+        endfor
+
+      endfor
+      Ai = invert(A)
+      print, FORMAT='(%" %d of %d peaks created...")',$
+        numberInvolved, numberinvolved
+      endif
+      
+      
+
+      ; create and invert Matrix
+
+          
+      for i=0,numberInvolved-1 do begin
+        ; Signal in bins of Average Spectrum:
+        S[i] = total(actualTofData[bin1[i]:bin2[i]])*(SampleInterval*1e9/SingleIonSignal)/inttime;-total(AvgBaseline[bin1[i]:bin2[i]])
+      endfor
+        
+      coeffs = Ai#S
+
+      ; convert to cps:
+      for i=0,numberInvolved-1 do begin
+        Cps[counter,i]=coeffs[i]/Faktor[i]
+      endfor
+      actualTime = double(actualBufTime)+double(averageTime)/2.0
+
+       StickTimes[counter]=MATLAB_timestamp+double(actualTime)/(24.0*3600.0)
+       
+      counter=counter+1
+      actualBufTime=maxBufTime+dt
+
+    endwhile
+    print, 'calculating sticks...'
+
+    ;counter=counter+1
+    totalElapsedTime = systime(1)-RunTimeStart
+    fileElapsedTime = systime(1)-FileTimeStart
+    estimatedTimeRemaining = (NumberOfFiles-(file+1))*fileElapsedTime/60; min
+    print, FORMAT='(%" %d s for this file, %d files remaining, %d minutes to go...")',$
+      fileElapsedTime, NumberOfFiles-(file+1),estimatedTimeRemaining
+
+  endfor
+  ;-------------- end main loop
+
+  ;create Fit_width data:
+  Dims = size(CPS,/DIMENSIONS)
+  FitWidth = make_array(Dims[0],Dims[1],/FLOAT,value=0.0)
+  uniVector = make_array(Dims[0],/FLOAT,value=1.0)
+  for i=0,Dims[1]-1 do begin
+    FitWidth[*,i]=uniVector/Resolution[round(MassList[i])]
+  endfor
+  
+  ;create duty area:
+  DutyArea = make_array(Dims[0],Dims[1],/FLOAT,value=0.0)
+  uniVector = make_array(Dims[0],/FLOAT,value=1.0)
+  for i=0,Dims[1]-1 do begin
+    for j=0,Dims[0]-1 do begin
+      DutyArea[j,i]=Cps[j,i]*sqrt(100.0/MassList[i])
+    endfor
+  endfor
+  
+  ;create nominal area:
+  maxMass = floor(max(actualMassAxis))
+  NominalArea = make_array(maxmass,Dims[0],/FLOAT,value=1.0)
+  
+  ;save Result:
+  ;--------------------------------------------------------------------------------
+  folder = FILE_DIRNAME(Files[0])
+  file = FILEPATH('_result.hfd5',ROOT_DIR=folder)
+
+  fid = H5F_CREATE(file)
+  
+  gid = H5G_CREATE(fid,'Fitted_MS_Data')
+
+  data = DutyArea
+    datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'duty_corrected_area',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+
+  data = MassList
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'exact_mass',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+
+  data = MassList
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'fit_acquisition_bin_center',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+  
+  
+  data = Cps
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'fit_area',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+   
+  data = MassList
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'fit_mass_center',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+  
+  data = FitWidth
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'fit_width',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data  
+  
+  data = Cps*0.0+1.0
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'goodness_of_fit',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+  
+  data = MassList
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'mass_list',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+
+  data = Cps
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'ncps',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+  
+  data = NominalArea
+  datatype_id = H5T_IDL_CREATE(float(data))
+  dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'nominal_area',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,data
+  
+  
+  datatype_id = H5T_IDL_CREATE(double(StickTimes))
+  dataspace_id = H5S_CREATE_SIMPLE(size(StickTimes,/DIMENSIONS))
+  dataset_id = H5D_CREATE(gid,'time_fit',datatype_id,dataspace_id)
+  H5D_WRITE,dataset_id,StickTimes
+  
+    
+  H5G_CLOSE, gid
+  H5F_CLOSE, fid
+  
+  
+  
+  
+end
+
+
 
 PRO createAvgSpectra, event
 
@@ -731,13 +1106,15 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
     
   ; get SumSpectrum: (unit: ions per bin per file)
   if (i eq 0) then begin
-    s = getSumSpec(files(i))
+    s = getSumSpec(files[i])
+    
+    ; temporary: only works for TOFWERK-Tofs: 
     file_id = H5F_OPEN(files[i])
-    dataset_id1 = H5D_OPEN(file_id, '/AcquisitionLog/Log')
-    tmp = H5D_READ(dataset_id1)
-    tmp2 = tmp[0]
-    timestamp = float(tmp2.TIMESTAMP)
-    unix_timestamp = (timestamp-130893181529880000.0)/1.0e7+1444844552.0
+    dataset_id2 = H5G_OPEN(file_id, '/TimingData')
+    aid = H5A_OPEN_NAME(dataset_id2,'AcquisitionTimeZero')
+    TimeStamp = double(H5A_READ(aid));
+    TimeStamp = TimeStamp[0]
+    unix_timestamp = (double(timestamp)-130893181529880000.0)/1.0e7+1444844552.0
     H5F_CLOSE, file_id
 
     tmp = size(s.SumSpec, /DIMENSIONS)
@@ -756,13 +1133,15 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
 
 
   endif else begin
-    s = getSumSpec(files(i))
+    s = getSumSpec(files[i])
+
     file_id = H5F_OPEN(files[i])
-    dataset_id1 = H5D_OPEN(file_id, '/AcquisitionLog/Log')
-    tmp = H5D_READ(dataset_id1)
-    tmp2 = tmp[0]
-    timestamp = float(tmp2.TIMESTAMP)
-    unix_timestamp = (timestamp-130893181529880000.0)/1.0e7+1444844552.0
+    
+    dataset_id2 = H5G_OPEN(file_id, '/TimingData')
+    aid = H5A_OPEN_NAME(dataset_id2,'AcquisitionTimeZero')
+    TimeStamp = double(H5A_READ(aid));
+    TimeStamp = TimeStamp[0]
+    unix_timestamp = (double(timestamp)-130893181529880000.0)/1.0e7+1444844552.0
     H5F_CLOSE, file_id
     
     tmp = size(s.SumSpec, /DIMENSIONS)
@@ -807,6 +1186,7 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
   ToF_p_R = ToF_p_a
   ToF_p_SampleInterval = ToF_p_a
   ToF_p_timestamp = ToF_p_a
+  DeltaPPM = Tof_p_a
   inttime=0
   
   
@@ -816,15 +1196,15 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
     file_id = H5F_OPEN(file)
     dataset_id1 = H5D_OPEN(file_id, '/SumSpectrum')
     id = H5A_OPEN_NAME(dataset_id1,'A')
-    ToF_p_a(i) = H5A_READ(id)
+    ToF_p_a[i] = H5A_READ(id)
     id = H5A_OPEN_NAME(dataset_id1,'Ex')
-    ToF_p_ex(i) = H5A_READ(id)
+    ToF_p_ex[i] = H5A_READ(id)
     id = H5A_OPEN_NAME(dataset_id1,'T0')
-    ToF_p_t0(i) = H5A_READ(id)
+    ToF_p_t0[i] = H5A_READ(id)
     id = H5A_OPEN_NAME(dataset_id1,'SampleInterval')
-    ToF_p_sampleInterval(i) = H5A_READ(id)
+    ToF_p_sampleInterval[i] = H5A_READ(id)
     id = H5A_OPEN_NAME(dataset_id1,'TimeStamp')
-    ToF_p_timestamp(i) = H5A_READ(id)
+    ToF_p_timestamp[i] = H5A_READ(id)
     
     if (i eq 0) then begin
       dataset_id1 = H5D_OPEN(file_id, '/SumSpectrum')
@@ -894,37 +1274,64 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
     endelse
     dataset_id1 = H5D_OPEN(file_id, '/SumSpectrum')
     id = H5A_OPEN_NAME(dataset_id1,'A')
-    ToF_p_a(i) = H5A_READ(id)
+    ToF_p_a[i] = H5A_READ(id)
     id = H5A_OPEN_NAME(dataset_id1,'Ex')
-    ToF_p_ex(i) = H5A_READ(id)
+    ToF_p_ex[i] = H5A_READ(id)
     id = H5A_OPEN_NAME(dataset_id1,'T0')
-    ToF_p_t0(i) = H5A_READ(id)
+    ToF_p_t0[i] = H5A_READ(id)
 
     id = H5A_OPEN_NAME(dataset_id1,'IntegrationTime')
     inttime=inttime+H5A_READ(id)
     id = H5A_OPEN_NAME(dataset_id1,'Resolution')
     tmp = H5A_READ(id)
-    ToF_p_R(i)=tmp;
+    ToF_p_R[i]=tmp;
+
+
+
 
     ; fit reolution function
-    A = [30D0, 0.3D0, 3000D0]
-    fita = [1,1,1]
+    ;A = [30D0, 0.3D0, 3000D0]
+    ;fita = [1,1,1]
     X = ToF_Resolution_x[where(ToF_Resolution[*,i] gt 0),i]
     Y = ToF_Resolution[where(ToF_Resolution[*,i] gt 0),i]
-    coefs = LMFIT(X,Y, A, /DOUBLE, $
-      FITA = fita, FUNCTION_NAME = 'ResolFitFunc', ITMAX=2000, TOL=1E-6)
-    ToF_ResolutionFitResult(i,*)=A
-    xxx = findgen(m-1)+1
-    nn = size(xxx, /DIMENSIONS)
-    for ii=0,nn[0]-1 do begin
-      ToF_ResolutionVsMass[ii,i] = A[2]*((alog(A[0]*xxx[ii]))^A[1])
-    endfor
-    ; interpolate resolution vs mass and define standard deviation:
+    ;coefs = LMFIT(X,Y, A, /DOUBLE, $
+    ;  FITA = fita, FUNCTION_NAME = 'ResolFitFunc', ITMAX=2000, TOL=1E-6)
+    ;ToF_ResolutionFitResult[i,*]=A
+    ;xxx = findgen(m-1)+1
+    ;nn = size(xxx, /DIMENSIONS)
+    ;for ii=0,nn[0]-1 do begin
+    ;  ToF_ResolutionVsMass[ii,i] = A[2]*((alog(A[0]*xxx[ii]))^A[1])
+    ;endfor
+    ;interpolate resolution vs mass and define standard deviation:
     X2 = [0, X, 10000];
     Y2 = [Y[0], Y, Y[-1]];
     x3 = findgen(9999)
     y = interpol(Y2,X2,x3)
     Tof_ResolutionInterp[i,*]=y
+    
+    ; fit position of Monitormass:
+    m_over_z = getpar('monitorMass')
+    R = Tof_ResolutionInterp[round(M_over_z)]
+    xmin = round(m2t(m_over_z-0.2,a0,t00,ex0,ToF_p_SampleInterval[0]))
+    xmax = round(m2t(m_over_z+0.2,a0,t00,ex0,ToF_p_SampleInterval[0]))
+    tmp=size(sumSpec,/dimensions)
+    timeAxis=lindgen(max(tmp)-1)
+    Xvalues = m2t(timeAxis[xmin:xmax],a0,t00,ex0,ToF_p_SampleInterval[0])
+    Yvalues = sumSpec[xmin:xmax]
+    ; take only top 50%; gives more accurate center (? if true) and that's what we need:
+    Xvalues = Xvalues[where(Yvalues gt 0.5*max(Yvalues))]
+    Yvalues = Yvalues[where(Yvalues gt 0.5*max(Yvalues))]
+    yfit = GAUSSFIT(Xvalues, Yvalues, coeff, NTERMS=3)    
+    DeltaPPM[i] = (coeff[1]-m_over_z)/m_over_z*1e6 
+    ;A = [30D0, 0.3D0, 3000D0]
+    ;fita = [1,1,1]
+    ;coefs = LMFIT(Xvalues,Yvalues, A, /DOUBLE, $
+    ;  FITA = fita, FUNCTION_NAME = 'SinglePeakFitFunc', ITMAX=2000, TOL=1E-6)
+    ;ToF_ResolutionFitResult[i,*]=A
+    ;xxx = findgen(m-1)+1
+    ;nn = size(xxx, /DIMENSIONS)
+    
+    
   endfor
   
   WINDOW, xsize=1250,ysize=700
@@ -986,8 +1393,8 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
   endfor  
   oplot, Xnew[1800:2200],ToF_MeanPeakShape[1800:2200], thick=2, color=200
   
-  ;m_over_z = 371.1
-  m_over_z = 21.02
+  m_over_z = getpar('monitorMass')
+  ;m_over_z = 21.02
 
   xmin = round(m2t(m_over_z-0.2,a0,t00,ex0,ToF_p_SampleInterval[0]))
   xmax = round(m2t(m_over_z+0.2,a0,t00,ex0,ToF_p_SampleInterval[0]))
@@ -1011,7 +1418,8 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
 
   plot, x, ToF_p_a, xtitle='file number',ytitle='a', background=-1,thick=2, color=0, charsize=3,  yrange=[min(ToF_p_a),max(ToF_p_a)]
   
-  plot, x, ToF_p_ex, xtitle='file number',ytitle='exponent', background=-1,thick=2, color=0, charsize=3, yrange=[min(ToF_p_ex),max(ToF_p_ex)]
+  plot, x, DeltaPPM, xtitle='file number',ytitle='check mass [ppm]', background=-1,thick=2, color=0, charsize=3, yrange=[min(DeltaPPM),max(DeltaPPM)]
+  ;plot, x, ToF_p_ex, xtitle='file number',ytitle='exponent', background=-1,thick=2, color=0, charsize=3, yrange=[min(ToF_p_ex),max(ToF_p_ex)]
   ;plot, x, ToF_p_t0, xtitle='file number',ytitle='t0', background=-1,thick=2, color=0, charsize=3, yrange=[min(ToF_p_t0),max(ToF_p_t0)]
   
   ltof = fltarr(numberOfFiles+1)
@@ -1019,7 +1427,7 @@ numberOfFiles=(size(Files,/DIMENSIONS))[0]-1
     ltof[ii]=m2t(200,ToF_p_a[ii],ToF_p_t0[ii],ToF_p_ex[ii],sampleInterval)*sampleInterval * sqrt(2*6000*1.6E-19/(200*1.66E-27))*1000 ;mm
   endfor
    
-  plot, x, ltof, xtitle='file number',ytitle='length', background=-1,thick=2, color=0, charsize=3, yrange=[min(ltof),max(ltof)]
+  plot, x, ltof, xtitle='file number',ytitle='TOF length [mm]', background=-1,thick=2, color=0, charsize=3, yrange=[min(ltof),max(ltof)]
   
   
   plot, x, ToF_p_R, xtitle='file number',ytitle='Resolution', background=-1,thick=2, color=0, charsize=3, yrange=[min(ToF_Resolution),max(ToF_Resolution)]
@@ -1503,7 +1911,7 @@ compile_opt idl2
     MassList = H5D_read(dataset_id1)
 
     dataset_id1 = H5D_OPEN(fileid, '/TimeStamps')
-    unix_timestamps = H5D_read(dataset_id1)
+    unix_timestamps = double(H5D_read(dataset_id1))
 
     peakShapeCum = total(PeakShape, /CUMULATIVE)
     peakShape=peakShape/max(peakShapeCum)
@@ -1531,8 +1939,6 @@ compile_opt idl2
     H5S_SELECT_HYPERSLAB, dataspace_id1, start, width,  /RESET
     memory_space_id1 = H5S_CREATE_SIMPLE(width)
     minSpectrum=rearrange(H5D_READ(dataset_id1, FILE_SPACE=dataspace_id1, MEMORY_SPACE=memory_space_id1)) ; Data
-
-
 
     H5S_CLOSE, memory_space_id1
     H5d_CLOSE, dataset_id1
@@ -1611,11 +2017,11 @@ for i=0,n[0]-1 do begin
   Faktor[i] = cumPeak[indx2[i]]-cumPeak[indx1[i]]
 
   ; Signal in bins of Average Spectrum:
-  S[i] = total(AvgSpectrum[bin1:bin2])-total(AvgBaseline[bin1:bin2])
+  S[i] = total(AvgSpectrum[bin1:bin2]);-total(AvgBaseline[bin1:bin2])
   
   ; Signal in bins of individual Files:
   for k=0,tmp[1]-1 do begin
-    SFiles[i,k] = total(Data[bin1:bin2,k])-total(BaseLines[bin1:bin2,k])
+    SFiles[i,k] = total(Data[bin1:bin2,k]);-total(BaseLines[bin1:bin2,k])
   endfor
   
   ; create Matrix
@@ -1624,7 +2030,7 @@ for i=0,n[0]-1 do begin
   endfor
 endfor
 
-Ai = invert(A); invert Matrix
+Ai = invert(A, stat); invert Matrix
 
 ; solve for averge Spectrum:
 coeffs = Ai#S
@@ -1723,10 +2129,32 @@ i=event.index
       ;oplot, x[xmin:xmax],  data[xmin:xmax], color=35, thick=2
       oplot, [Pcenter,Pcenter], [min(data[xmin:xmax]),max(data[xmin:xmax])], color=28
       
+      s = size(cpsFiles,/DIMENSIONS)
       n = size(peaksInvolved, /DIMENSIONS)
       for i=0,n[0]-1 do begin
       ;  oplot, x[xmin:xmax],Peaks[i,xmin:xmax]*coeffs[i], color=144
       endfor
+      loadct, 33
+      counter=0
+      for i=0,s[0]-1 do begin
+        if (x[xmin] lt MassList[PeaksInvolved[i]] and x[xmax] gt MassList[PeaksInvolved[i]]) then begin
+          counter=counter+1
+        endif
+      endfor
+      anz = counter
+      counter=0
+      for i=0,s[0]-1 do begin
+        if (x[xmin] lt MassList[PeaksInvolved[i]] and x[xmax] gt MassList[PeaksInvolved[i]]) then begin
+          t=1
+          if (i eq peakUnderInvestigation) then  t=2
+          counter=counter+1
+          c = round(255*(counter-1)/anz)
+          oplot, [MassList[PeaksInvolved[i]],MassList[PeaksInvolved[i]]], [0.0001, 1], color=c, thick=t
+        endif
+      endfor
+
+
+
 
       sumFit = Peaks[0,*]*coeffs[0]
       m = size(sumFit, /DIMENSIONS)
@@ -1740,12 +2168,26 @@ i=event.index
 
    ; plot time series of file means in cps:
    s = size(cpsFiles,/DIMENSIONS)
-   times = unix_timestamps
+   times = double(unix_timestamps)
+  
+   
    for i=0,s[1]-1 do begin
-      times[i]=unix_timestamps[i]-unix_timestamps[0]
+      times[i]=double(unix_timestamps[i]-unix_timestamps[0])
    endfor
-
-   plot, times,  cpsFiles[peakUnderInvestigation,*], /YLOG, /YNOZERO, xstyle=1,ystyle=1,  XTITLE='Time', YTITLE='cps' , color=0, thick=0, background=-1,yrange=[0.01,max(cpsFiles)*1.1], charsize=1.5
+   ;temporary fix for timestamp-problem:
+   for i=1, s[1]-2 do begin
+     if times[i]>times[i+1] then times[i]=(times[i-1]+times[i+1])/2.0
+   endfor
+   
+   tmp = size(times,/DIMENSIONS)
+   
+   times=times/3600.0
+   ;cpsFiles2 = cpsFiles
+   ;cpsFiles = make_array(s[0],s[1],/FLOAT,value=0)
+   ;for i=0,s[0]-1 do begin
+   ; cpsFiles[i,*]=cpsFiles2[i,1:tmp[0]]
+   ;endfor
+   plot, times,  cpsFiles[peakUnderInvestigation,*], /YNOZERO, xstyle=1,ystyle=1,  XTITLE='Time [h]', YTITLE='cps' , color=0, thick=0, background=-1,yrange=[0.01,max(cpsFiles)*1.1], charsize=1.5
    loadct, 33
    counter=0
    for i=0,s[0]-1 do begin
@@ -1764,9 +2206,23 @@ i=event.index
       oplot, times, cpsFiles[i,*], color=c, thick=t
      endif
    endfor
-   
+ 
+ ;y=fehler
+ ;plot coefficients:
+;s = size(A,/DIMENSIONS)
+;s = [counter, counter]
+;plot,findgen(s[0]),findgen(s[0]),/ISOTROPIC,color='white',xmargin=[s[0],s[0]],ymargin=[s[0],s[0]],xticklen=0,yticklen=0
+;for i=0,s[0] do begin
+;  oplot, [0.0, 0.0], [s[0]+1,s[0]+1], color=0
+;  oplot, [s[0]+1,s[0]+1],[0.0, 0.0], color=0
+;endfor
+;for i=0,s[0] do begin
+;  for ii=0,s[0] do begin
+;    xyouts,i+0.2,ii+0.2, A[i,ii]
+;  endfor
+;endfor
 
-   y=fehler 
+;   y=fehler 
  endif
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -7368,7 +7824,7 @@ pro saveSumSpecs, folder, name, Names, Filepar, peaks, a, t0, ex, minSpec, maxSp
 
 
   data = unix_timestamps
-  datatype_id = H5T_IDL_CREATE(float(data))
+  datatype_id = H5T_IDL_CREATE(double(data))
   dataspace_id = H5S_CREATE_SIMPLE(size(data,/DIMENSIONS))
   dataset_id = H5D_CREATE(fid,'TimeStamps',datatype_id,dataspace_id)
   H5D_WRITE,dataset_id,data
@@ -7590,9 +8046,11 @@ pro saveSpec, folder, name, spectrum, filePar, sampInt, duration, unix_timestamp
 
   attr_id = H5A_CREATE(dataset_id,'IntegrationTime',datatype_id,dataspace_id)
   H5A_WRITE,attr_id,duration
-
+  
+  datatype_id = H5T_IDL_CREATE(double(unix_timestamp))
+  dataspace_id = H5S_CREATE_SCALAR()
   attr_id = H5A_CREATE(dataset_id,'TimeStamp',datatype_id,dataspace_id)
-  H5A_WRITE,attr_id,unix_timestamp
+  H5A_WRITE,attr_id,double(unix_timestamp)
 
   H5D_CLOSE,dataset_id
   H5S_CLOSE,dataspace_id
